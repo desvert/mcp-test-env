@@ -1,0 +1,43 @@
+# ── Generated output (runtime artifacts) ─────────────────────────────────────
+output/pcap/*.pcap
+output/pcap/*.pcapng
+!output/pcap/.gitkeep
+
+output/suricata/*
+!output/suricata/.gitkeep
+
+output/zeek/*
+!output/zeek/.gitkeep
+
+output/attacker/*
+!output/attacker/.gitkeep
+
+# nmap / nikto / hydra results written by attacker container
+output/*.txt
+output/*.xml
+output/*.log
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+
+# ── Docker ────────────────────────────────────────────────────────────────────
+.docker/
+
+# ── Editors ───────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Miscellaneous ─────────────────────────────────────────────────────────────
+.claude/

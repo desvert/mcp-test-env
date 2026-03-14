@@ -1,0 +1,10 @@
+root
+admin
+msfadmin
+user
+guest
+postgres
+service
+tomcat
+ftp
+www-data

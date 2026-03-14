@@ -1,0 +1,93 @@
+# ── Network ───────────────────────────────────────────────────────────────────
+# A named bridge gives us a deterministic interface name (lab-br0) on the host.
+# Sensor containers use network_mode: host so they can attach to lab-br0 in
+# promiscuous mode and see all traffic between attacker and victim.
+networks:
+  labnet:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: lab-br0
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.30.0.0/24
+
+services:
+
+  # ── Vulnerable target ───────────────────────────────────────────────────────
+  victim:
+    image: tleemcjr/metasploitable2:latest
+    hostname: victim
+    networks:
+      labnet:
+        ipv4_address: 172.30.0.10
+    # Metasploitable2 boots a full SysV init system inside the container and
+    # needs elevated capabilities to start its services (vsftpd, sshd, apache,
+    # postgres, ircd, etc.).
+    privileged: true
+    tty: true
+    restart: "no"
+
+  # ── Automated attacker ──────────────────────────────────────────────────────
+  attacker:
+    build:
+      context: ./attacker
+    hostname: attacker
+    networks:
+      labnet:
+        ipv4_address: 172.30.0.20
+    volumes:
+      - ./output:/output
+    # Start after sensors are up so no attack traffic is missed
+    depends_on:
+      - victim
+      - tcpdump
+      - suricata
+      - zeek
+    restart: "no"
+
+  # ── Sensors (host network — monitor lab-br0 in promiscuous mode) ────────────
+
+  tcpdump:
+    build:
+      context: ./sensor/tcpdump
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./output/pcap:/pcap
+    depends_on:
+      - victim
+    restart: "no"
+
+  suricata:
+    image: jasonish/suricata:latest
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_NICE
+    volumes:
+      - ./output/suricata:/var/log/suricata
+      - ./sensor/suricata/suricata.yaml:/etc/suricata/suricata.yaml:ro
+      - ./sensor/suricata/start.sh:/start.sh:ro
+    entrypoint: ["/bin/bash", "/start.sh"]
+    depends_on:
+      - victim
+    restart: "no"
+
+  zeek:
+    image: zeek/zeek:latest
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./output/zeek:/zeek-logs
+      - ./sensor/zeek/start.sh:/start.sh:ro
+    working_dir: /zeek-logs
+    entrypoint: ["/bin/bash", "/start.sh"]
+    depends_on:
+      - victim
+    restart: "no"
