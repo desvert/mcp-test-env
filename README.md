@@ -3,7 +3,7 @@
 A self-contained Docker Compose lab that automatically generates realistic network
 forensics samples — PCAP, Suricata IDS alerts, and Zeek NSM logs — by running
 scripted attacks against an intentionally vulnerable target. Designed for analysis
-practice with the [mcp-netparse / mcp-otparse toolchain](../containers/).
+practice with the [mcp-netparse](https://github.com/desvert/ai-soc-mcp-lab) / [mcp-otparse](https://github.com/desvert/otparse-mcp) toolchain.
 
 ---
 
