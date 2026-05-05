@@ -11,6 +11,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.0] - 2026-05-05
+
+### Added
+
+- **`modbus-sim/`** — new service: Modbus TCP HVAC controller simulator
+  - `Dockerfile` — `python:3.12-slim` base, installs `pymodbus==3.13.0`, binds
+    port 502 with `NET_BIND_SERVICE` capability (no full root required)
+  - `hvac_server.py` — async pymodbus 3.x server simulating a four-register-type
+    HVAC device (coils, discrete inputs, holding registers, input registers);
+    zone temperature drifts toward setpoint with noise; alarms latch and clear
+    via dedicated reset coil; 5-second sensor update loop with structured logging
+  - `mbpoll_cheatsheet.txt` — quick-reference commands for reading/writing all
+    register types and scripted attack/exercise scenarios (setpoint override,
+    actuator lock-out, freeze/overheat simulation)
+- **`docker-compose.yml`** — added `modbus-sim` service (172.30.0.30 on labnet,
+  `cap_drop: ALL` + `cap_add: NET_BIND_SERVICE`, `PYTHONUNBUFFERED=1`, json-file
+  logging with rotation); added `modbus-sim` to `attacker.depends_on` so attack
+  traffic begins only after the PLC simulator is ready
+- **`attacker/Dockerfile`** — added `mbpoll` to the apt install block for
+  Modbus TCP register polling from the attacker container
+
+---
+
 ## [0.1.0] - 2026-03-12
 
 ### Added
@@ -54,5 +77,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   details, startup sequencing, generated output reference, MCP toolchain
   integration guide, customization options, and troubleshooting
 
-[Unreleased]: https://github.com/desvert/mcp-test-env/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/desvert/mcp-test-env/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/desvert/mcp-test-env/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/desvert/mcp-test-env/releases/tag/v0.1.0

@@ -1,0 +1,74 @@
+# modbus-sim quick reference
+# All examples use mbpoll. Install: apt install mbpoll
+# Replace CONTAINER_IP with the container's IP on labnet
+# (or use the service name `modbus-sim` if running from another container on the same network).
+
+# ---------------------------------------------------------------------------
+# Read input registers (live sensor data)
+# ---------------------------------------------------------------------------
+
+# Read all 4 input registers starting at address 1 (zone temp, return, supply, runtime)
+mbpoll -t 3 -r 1 -c 4 -1 CONTAINER_IP
+
+# ---------------------------------------------------------------------------
+# Read holding registers (setpoint and thresholds)
+# ---------------------------------------------------------------------------
+
+# Read setpoint and fan speed
+mbpoll -t 4 -r 1 -c 2 -1 CONTAINER_IP
+
+# ---------------------------------------------------------------------------
+# Read coils (fan, cooling, heating, alarm reset)
+# ---------------------------------------------------------------------------
+mbpoll -t 0 -r 1 -c 4 -1 CONTAINER_IP
+
+# ---------------------------------------------------------------------------
+# Read discrete inputs (alarms)
+# ---------------------------------------------------------------------------
+mbpoll -t 1 -r 1 -c 3 -1 CONTAINER_IP
+
+# ---------------------------------------------------------------------------
+# Write coils (control outputs)
+# ---------------------------------------------------------------------------
+
+# Turn fan ON
+mbpoll -t 0 -r 1 CONTAINER_IP 1
+
+# Turn cooling ON
+mbpoll -t 0 -r 2 CONTAINER_IP 1
+
+# Turn heating ON (note: running heat+cool simultaneously is valid for the
+# simulator; in real life your controls logic would interlock these)
+mbpoll -t 0 -r 3 CONTAINER_IP 1
+
+# Trigger alarm reset
+mbpoll -t 0 -r 4 CONTAINER_IP 1
+
+# ---------------------------------------------------------------------------
+# Write holding registers
+# ---------------------------------------------------------------------------
+
+# Change setpoint to 68.0°F (value = 680)
+mbpoll -t 4 -r 1 CONTAINER_IP 680
+
+# Change fan speed to 75%
+mbpoll -t 4 -r 2 CONTAINER_IP 75
+
+# Lower hi-temp alarm threshold to 80.0°F (value = 800) to trigger alarm sooner
+mbpoll -t 4 -r 3 CONTAINER_IP 800
+
+# ---------------------------------------------------------------------------
+# Useful attack/exercise scenarios
+# ---------------------------------------------------------------------------
+
+# Force fan off while cooling is active (simulates actuator override)
+mbpoll -t 0 -r 1 CONTAINER_IP 0
+
+# Set setpoint to 0 (freeze attack simulation)
+mbpoll -t 4 -r 1 CONTAINER_IP 0
+
+# Set setpoint to 1200 (overheat attack simulation)
+mbpoll -t 4 -r 1 CONTAINER_IP 1200
+
+# Poll zone temp in a loop (watch the drift)
+watch -n 5 "mbpoll -t 3 -r 1 -c 1 -1 CONTAINER_IP"

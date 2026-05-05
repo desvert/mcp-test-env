@@ -3,7 +3,7 @@
 A self-contained Docker Compose lab that automatically generates realistic network
 forensics samples — PCAP, Suricata IDS alerts, and Zeek NSM logs — by running
 scripted attacks against an intentionally vulnerable target. Designed for analysis
-practice with the [mcp-netparse](https://github.com/desvert/ai-soc-mcp-lab) / [mcp-otparse](https://github.com/desvert/otparse-mcp) toolchain.
+practice with the [mcp-netparse / mcp-otparse toolchain](../containers/).
 
 ---
 
@@ -30,12 +30,16 @@ Running `docker compose up` will:
 
 1. Start **Metasploitable2** — a Linux VM image deliberately packed with vulnerable
    services (vsftpd 2.3.4, OpenSSH, Apache/DVWA, UnrealIRCd, Tomcat, PostgreSQL, VNC).
-2. Start three **sensor containers** that passively monitor all lab traffic:
+2. Start **modbus-sim** — a pymodbus 3.x Modbus TCP server simulating an HVAC
+   controller (zone temperature, setpoint, alarms, fan/cooling/heating coils) on
+   port 502 at 172.30.0.30.
+3. Start three **sensor containers** that passively monitor all lab traffic:
    - `tcpdump` → writes a full PCAP
    - `suricata` → IDS with Emerging Threats Open rules, writes `fast.log` and `eve.json`
-   - `zeek` → NSM, writes `conn.log`, `http.log`, `dns.log`, and more
-3. Start an **attacker container** that runs a sequence of automated attacks — port
-   scans, web scans, brute-force, HTTP injection attempts, and banner grabs — then exits.
+   - `zeek` → NSM, writes `conn.log`, `http.log`, `dns.log`, `ftp.log`, `ssh.log`, and more
+4. Start an **attacker container** that runs a sequence of automated attacks — port
+   scans, web scans, brute-force, HTTP injection attempts, Modbus register reads and
+   writes, and banner grabs — then exits.
 
 Everything is written to `output/` on the host, ready for analysis.
 
@@ -44,27 +48,29 @@ Everything is written to `output/` on the host, ready for analysis.
 ## Architecture
 
 ```
-                ┌──────────────────────────────────────────────────────┐
-                │               Docker bridge: lab-br0                 │
-                │                  (172.30.0.0/24)                     │
-  ┌──────────┐  │  ┌──────────────────────┐                           │
-  │ attacker │◄─┼─►│       victim         │                           │
-  │.0.20     │  │  │  172.30.0.10         │                           │
-  └──────────┘  │  │  Metasploitable2     │                           │
-                │  │  FTP · SSH · HTTP    │                           │
-                │  │  SMB · VNC · IRC     │                           │
-                │  │  Telnet · SMTP       │                           │
-                │  └──────────────────────┘                           │
-                └──────────────────────────────────────────────────────┘
-                              │ all frames visible via promiscuous mode
-                              ▼
-                ┌─────────────────────────────────────┐
-                │          host network               │
-                │                                     │
-                │  tcpdump ──► output/pcap/           │
-                │  suricata ──► output/suricata/      │
-                │  zeek ──────► output/zeek/          │
-                └─────────────────────────────────────┘
+  ┌────────────────────────────────────────────────────────────────────────┐
+  │                      Docker bridge: lab-br0                           │
+  │                         (172.30.0.0/24)                               │
+  │                                                                        │
+  │  ┌──────────┐    ┌──────────────────────┐  ┌────────────────────────┐ │
+  │  │ attacker │◄──►│       victim         │  │      modbus-sim        │ │
+  │  │.0.20     │    │  172.30.0.10         │  │  172.30.0.30           │ │
+  │  └────┬─────┘    │  Metasploitable2     │  │  HVAC controller       │ │
+  │       │          │  FTP · SSH · HTTP    │  │  Modbus TCP : 502      │ │
+  │       └─────────►│  SMB · VNC · IRC     │  └────────────────────────┘ │
+  │                  │  Telnet · SMTP       │           ▲                  │
+  │                  └──────────────────────┘           │ mbpoll reads/    │
+  │                                          ───────────┘ writes          │
+  └────────────────────────────────────────────────────────────────────────┘
+                │ all frames visible via promiscuous mode
+                ▼
+  ┌─────────────────────────────────────┐
+  │          host network               │
+  │                                     │
+  │  tcpdump ──► output/pcap/           │
+  │  suricata ──► output/suricata/      │
+  │  zeek ──────► output/zeek/          │
+  └─────────────────────────────────────┘
 ```
 
 ### Why sensors run on the host network
@@ -92,12 +98,14 @@ logic.
 Docker creates labnet / lab-br0
         │
         ├─► victim starts         (creates lab-br0 by joining labnet)
+        ├─► modbus-sim starts     (joins labnet; binds Modbus TCP port 502)
         │
         ├─► tcpdump starts        (loops until /sys/class/net/lab-br0 exists)
         ├─► suricata starts       (same wait; then runs suricata-update; then captures)
         └─► zeek starts           (same wait; then captures)
                 │
-                └─► attacker starts (depends_on all sensors; then waits for victim ping)
+                └─► attacker starts (depends_on: victim, modbus-sim, tcpdump,
+                                     suricata, zeek; then waits for victim ping)
 ```
 
 `depends_on` ensures Docker's start *ordering*. The wait loops inside each
@@ -114,6 +122,7 @@ all its services before attacks begin.
 |---|---|---|---|
 | `victim` | `tleemcjr/metasploitable2` | 172.30.0.10 | Vulnerable target |
 | `attacker` | custom (`ubuntu:22.04`) | 172.30.0.20 | Runs attack sequences |
+| `modbus-sim` | custom (`python:3.12-slim`) | 172.30.0.30 | Modbus TCP HVAC simulator |
 | `tcpdump` | custom (`alpine:3.19`) | host | Full PCAP capture |
 | `suricata` | `jasonish/suricata:latest` | host | IDS — alerts + metadata |
 | `zeek` | `zeek/zeek:latest` | host | NSM — protocol logs |
@@ -150,6 +159,7 @@ Built from `ubuntu:22.04`. Installed tools:
 - **hydra** — credential brute forcing (FTP, SSH, HTTP)
 - **curl** — HTTP attacks (SQLi, traversal, XSS, Shellshock)
 - **ncat / netcat-openbsd** — banner grabbing
+- **mbpoll** — Modbus TCP register reads and writes against modbus-sim
 - **python3** — available for custom scripts
 - **nslookup / dig** — DNS queries (generates zeek `dns.log` entries)
 
@@ -163,6 +173,49 @@ until you stop the stack. Re-run the attacker without restarting sensors:
 ```bash
 docker compose run --rm attacker
 ```
+
+### modbus-sim
+
+Built from `python:3.12-slim` with `pymodbus==3.13.0`. Simulates a Modbus TCP
+HVAC controller at 172.30.0.30, bound to the standard port 502. Sensor values
+update every 5 seconds; structured logs are emitted on each tick.
+
+Register map (all temperature values in tenths of °F — e.g. 720 = 72.0 °F):
+
+| Type | Address | Description | Default |
+|---|---|---|---|
+| Coil (FC01/05) | 1 | Fan enable | off |
+| Coil | 2 | Cooling enable | off |
+| Coil | 3 | Heating enable | off |
+| Coil | 4 | Alarm reset | — write 1 to clear latched alarms |
+| Discrete Input (FC02) | 1 | High-temp alarm | latches when zone > threshold |
+| Discrete Input | 2 | Low-temp alarm | latches when zone < threshold |
+| Discrete Input | 3 | Filter alarm | latches when runtime > 500 h; not clearable |
+| Holding Register (FC03) | 1 | Setpoint | 720 (72.0 °F) |
+| Holding Register | 2 | Fan speed % | 50 |
+| Holding Register | 3 | Hi-temp alarm threshold | 850 (85.0 °F) |
+| Holding Register | 4 | Lo-temp alarm threshold | 600 (60.0 °F) |
+| Input Register (FC04) | 1 | Zone temperature | ~720, drifts |
+| Input Register | 2 | Return air temperature | ~680 |
+| Input Register | 3 | Supply air temperature | ~550 |
+| Input Register | 4 | Runtime hours | 42 at start |
+
+Poll and control from the attacker container using `mbpoll` (installed in the
+attacker image):
+
+```bash
+# Read all four input registers (live sensor data)
+docker compose exec attacker mbpoll -t 3 -r 1 -c 4 -1 172.30.0.30
+
+# Write setpoint to 68.0°F (setpoint override attack)
+docker compose exec attacker mbpoll -t 4 -r 1 172.30.0.30 680
+
+# Force fan off while cooling is active
+docker compose exec attacker mbpoll -t 0 -r 1 172.30.0.30 0
+```
+
+See `modbus-sim/mbpoll_cheatsheet.txt` for the full command reference including
+freeze/overheat simulation and polling loops.
 
 ### tcpdump
 
@@ -204,7 +257,7 @@ Logs are written to `output/zeek/` (mounted as the working directory).
 - **Linux host** — sensors use `network_mode: host` to capture the Docker bridge.
   This will *not* work on Docker Desktop for macOS or Windows (the Docker VM's
   bridge is not visible from the host).
-- **5-6 GB free disk** for images + runtime output
+- **~4 GB free disk** for images + runtime output
 - **Internet access** at container startup (for `suricata-update`); the stack
   still works without it, just with an empty rule set
 
@@ -301,7 +354,9 @@ After a complete run, `output/` will contain:
 ### `output/pcap/capture.pcap`
 
 Full-fidelity PCAP of every frame that crossed `lab-br0`. Open in Wireshark, or
-pass to any of the `mcp__netparse__pcap_*` MCP tools.
+pass to any of the `mcp__netparse__pcap_*` MCP tools. Includes Modbus TCP flows
+on port 502 between the attacker and modbus-sim; parse these with
+`mcp__otparse__parse_modbus_pcap`.
 
 ### `output/suricata/`
 
@@ -313,7 +368,9 @@ pass to any of the `mcp__netparse__pcap_*` MCP tools.
 | `stats.log` | Packet counters, decoder stats, flow table metrics |
 
 `eve.json` is the primary output. Each line is a self-contained JSON object with
-a `event_type` field (`alert`, `http`, `dns`, `flow`, `ssh`, `ftp`, etc.).
+a `event_type` field (`alert`, `http`, `dns`, `flow`, `ssh`, `ftp`, `modbus`, etc.).
+Suricata's Modbus app-layer parser is enabled for port 502 and will emit
+`event_type: modbus` records for decoded function-code transactions.
 
 Example alert entry:
 ```json
@@ -356,7 +413,7 @@ Standard Zeek TSV logs. The `local` policy generates:
 | `pe.log` | Portable executable metadata (if any executables transferred) |
 
 Zeek rotates logs by default. All logs from a single run appear in `output/zeek/`
-without subdirectories (the working-dir mount keeps them flat). Actual logs generated may vary based on traffic observed.
+without subdirectories (the working-dir mount keeps them flat).
 
 ### `output/attacker/` (written by attacker container)
 
@@ -402,8 +459,8 @@ without subdirectories (the working-dir mount keeps them flat). Actual logs gene
 
 ## Integration with the MCP Toolchain
 
-The `output/` directory is directly usable with the `mcp-netparse` and
-`mcp-knowledgeops` servers defined in `../containers/`. Mount `output/` as the
+The `output/` directory is directly usable with the `mcp-netparse`, `mcp-otparse`,
+and `mcp-knowledgeops` servers defined in `../containers/`. Mount `output/` as the
 evidence volume:
 
 ```json
@@ -417,6 +474,15 @@ evidence volume:
         "--network", "none",
         "-v", "$(pwd)/output:/evidence:ro",
         "mcp-netparse:latest"
+      ]
+    },
+    "otparse": {
+      "command": "docker",
+      "args": [
+        "run", "--rm", "-i",
+        "--network", "none",
+        "-v", "$(pwd)/output:/evidence:ro",
+        "mcp-otparse:latest"
       ]
     }
   }
@@ -440,6 +506,9 @@ mcp__netparse__pcap_dns_summary { "pcap_path": "/evidence/pcap/capture.pcap" }
 
 // HTTP hosts and URIs
 mcp__netparse__pcap_http_hosts { "pcap_path": "/evidence/pcap/capture.pcap" }
+
+// Parse Modbus TCP transactions (device inventory, register reads/writes)
+mcp__otparse__parse_modbus_pcap { "pcap_path": "/evidence/pcap/capture.pcap" }
 ```
 
 The `community_id` field in `eve.json` matches the Community ID in `conn.log`,
@@ -505,6 +574,31 @@ Create `sensor/zeek/local.zeek` and mount it into the zeek container:
 # docker-compose.yml (zeek service)
 volumes:
   - ./sensor/zeek/local.zeek:/usr/local/zeek/share/zeek/site/local.zeek:ro
+```
+
+### Interact with modbus-sim
+
+Use `mbpoll` from the attacker container or the host (if you expose port 502 via
+`ports:` in the compose file). A full command reference is in
+`modbus-sim/mbpoll_cheatsheet.txt`. Quick examples:
+
+```bash
+# Read live sensor values from the attacker container
+docker compose exec attacker mbpoll -t 3 -r 1 -c 4 -1 172.30.0.30
+
+# Overheat simulation — set setpoint to 120.0°F
+docker compose exec attacker mbpoll -t 4 -r 1 172.30.0.30 1200
+
+# Watch zone temperature drift in real time
+docker compose exec attacker watch -n 5 "mbpoll -t 3 -r 1 -c 1 -1 172.30.0.30"
+```
+
+To modify the simulated device behaviour, edit `modbus-sim/hvac_server.py` and
+rebuild:
+
+```bash
+docker compose build modbus-sim
+docker compose up -d modbus-sim
 ```
 
 ### Adjust subnet
@@ -574,6 +668,23 @@ The ping loop has a 120 s timeout. Metasploitable2 typically boots in 30–60 s.
 If your machine is slow, increase `TIMEOUT=120` at the top of `attacks.sh` and
 rebuild the attacker image.
 
+### modbus-sim not responding
+
+```bash
+# Verify the server is bound on port 502 inside the container
+docker compose exec modbus-sim ss -tlnp | grep 502
+
+# Check for the startup log line
+docker compose logs modbus-sim | grep "Starting Modbus TCP server"
+
+# Confirm the container is on labnet with the expected IP
+docker inspect modbus-sim --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'
+```
+
+If `ss` shows nothing on 502, the `NET_BIND_SERVICE` capability may have been
+dropped. Verify `cap_add: [NET_BIND_SERVICE]` is present in the modbus-sim
+service block of `docker-compose.yml`.
+
 ### Port conflicts on the host
 
 Metasploitable2 ports are **not published** to the host — all services are only
@@ -588,12 +699,17 @@ reachable within the `labnet` Docker network. There are no `ports:` mappings in
   the host. The `labnet` network is a private Docker bridge. External hosts
   cannot reach the victim unless you explicitly add `ports:` mappings.
 
+- **`privileged: true` on the victim.** This grants the Metasploitable2
+  container elevated kernel capabilities. Only run this lab on a trusted host
+  and shut it down when not in use: `docker compose down`.
+
+- **modbus-sim uses minimal capabilities.** `cap_drop: ALL` with only
+  `NET_BIND_SERVICE` added — the minimum required to bind port 502. No other
+  elevated capabilities are granted.
+
 - **Sensors use `network_mode: host`.** This allows the sensor containers to see
   *all* Docker traffic on the host, not just lab traffic. On a shared machine,
   be aware that sensor captures may include traffic from other Docker networks.
-
-- **`privileged: true` on the victim.** This grants the Metasploitable2
-  container elevated kernel capabilities. Only run this lab on a trusted host.
 
 - **Shut down when done.** Don't leave Metasploitable2 running unattended.
   ```bash

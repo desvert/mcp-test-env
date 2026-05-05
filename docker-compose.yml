@@ -41,9 +41,43 @@ services:
     # Start after sensors are up so no attack traffic is missed
     depends_on:
       - victim
+      - modbus-sim
       - tcpdump
       - suricata
       - zeek
+    restart: "no"
+
+  # ── Modbus TCP HVAC simulator ───────────────────────────────────────────────
+  # Simulates a Modbus TCP HVAC controller on a static IP.
+  # Sensors (tcpdump, Suricata, Zeek) capture its traffic automatically via
+  # lab-br0 -- no changes to sensor containers required.
+  #
+  # Interact from the attacker container:
+  #   docker compose exec attacker mbpoll -t 3 -r 1 -c 4 -1 172.30.0.30
+  # Or from the host (if you uncomment the ports block below):
+  #   mbpoll -t 3 -r 1 -c 4 -1 localhost
+  modbus-sim:
+    build:
+      context: ./modbus-sim
+      dockerfile: Dockerfile
+    hostname: modbus-sim
+    container_name: modbus-sim
+    networks:
+      labnet:
+        ipv4_address: 172.30.0.30
+    # ports:
+    #   - "5020:5020"     # uncomment + change CMD port for host access without root
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    environment:
+      - PYTHONUNBUFFERED=1
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: "no"
 
   # ── Sensors (host network — monitor lab-br0 in promiscuous mode) ────────────
