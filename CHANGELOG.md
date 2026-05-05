@@ -65,7 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `HOME_NET` set to lab subnet, Community ID enabled in eve-log, HTTP port list
   expanded to include Tomcat (8180), checksum validation disabled for local
   traffic, SSH HASSH fingerprinting enabled, all protocol app-layer parsers
-  active
+active
 - **`sensor/zeek/start.sh`** — waits for `lab-br0`, then runs `zeek -i lab-br0
   local` writing logs to `output/zeek/`
 - **`output/`** directory scaffold with `.gitkeep` files for `pcap/`,
